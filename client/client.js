@@ -29,7 +29,7 @@ canvas.stage.addEventListener('contextmenu', function (event) {
     return false;
 });
 
-var UPDATE_INTERVAL = 16;
+var UPDATE_INTERVAL = 100;
 var LAG_CAP = 1000;
 var last = Date.now();
 var lag = 0;
@@ -199,7 +199,14 @@ grid.neighbors = function neighbors (coords) {
 }
 
 grid.canSwap = function canSwap (source, target) {
-    return target !== null && (target[DATA_TYPE] === TILE_NONE || tiles[target[DATA_TYPE]].density < tiles[source[DATA_TYPE]].density);
+    if (!grid.inBounds(source) || !grid.inBounds(target)) {
+        return false;
+    }
+    var s = [];
+    var t = [];
+    unpack(grid.peek(source), s);
+    unpack(grid.peek(target), t);
+    return t[DATA_TYPE] === TILE_NONE || tiles[t[DATA_TYPE]].density < tiles[s[DATA_TYPE]].density;
 }
 
 grid.add = function add (coords, vec) {
@@ -273,7 +280,9 @@ var scratch = [];
 function update (dt) {
     var gridCoords = screenToGridCoords(game.mouse.position);
     if (game.player.isDrawing !== false) {
-        grid.put(gridCoords, pack([game.player.isDrawing, 0, 0, (game.tick + 1) % 2]));
+        if (game.player.isDrawing === 0 || unpack(grid.peek(gridCoords), scratch)[DATA_TYPE] === 0) {
+            grid.put(gridCoords, pack([game.player.isDrawing, 0, 0, (game.tick + 1) % 2]));
+        }
     }
 
     var tile = [];
@@ -294,7 +303,7 @@ function update (dt) {
             var swapDir = null;
 
             for (var i = 0; i < swapDirs.length; i++) {
-                if (grid.inBounds(grid.add(coords, dirs[swapDirs[i]])) && grid.canSwap(tile, unpack(neighbors[swapDirs[i]], target))) {
+                if (grid.inBounds(grid.add(coords, dirs[swapDirs[i]])) && grid.canSwap(coords, grid.add(coords, dirs[swapDirs[i]]))) {
                     swapDir = swapDirs[i];
                     break;
                 }
@@ -306,6 +315,7 @@ function update (dt) {
             } else if (swapDir) {
                 grid.put(coords, tile.packedValue ^ 1);
                 grid.swap(coords, grid.add(coords, dirs[swapDir]));
+                grid.put(coords, grid.peek(coords) ^ 1);
             }
         }
     }
