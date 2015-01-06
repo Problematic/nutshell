@@ -29,7 +29,7 @@ canvas.stage.addEventListener('contextmenu', function (event) {
     return false;
 });
 
-var UPDATE_INTERVAL = 100;
+var UPDATE_INTERVAL = 50;
 var LAG_CAP = 1000;
 var last = Date.now();
 var lag = 0;
@@ -88,7 +88,7 @@ for (var i = 0; i < Math.ceil(canvas.stage.width / game.gridNodeWidth); i++) {
 function pack (vals) {
     // array of format [T, E, P, U]
     // packs to a 16-bit number, in the following format:
-    // TTTT TTTT ---- ---U
+    // TTTT TTTT ---- PPPU
     // where T = tile type, - = unused, U = last updated
 
     if (!(vals instanceof Array)) {
@@ -139,23 +139,23 @@ grid.swap = function swap (source, target) {
     var tmp = this[source[1]][source[0]];
     this[source[1]][source[0]] = this[target[1]][target[0]];
     this[target[1]][target[0]] = tmp;
-}
+};
 
 grid.peek = function peek (coords) {
     return this[coords[1]][coords[0]];
-}
+};
 
 grid.put = function put (coords, value) {
     this[coords[1]][coords[0]] = value;
-}
+};
 
 grid.clear = function clear (coords) {
     this[coords[1]][coords[0]] = 0;
-}
+};
 
 grid.inBounds = function inBounds (coords) {
     return coords[0] >= 0 && coords[0] < gridWidth && coords[1] >= 0 && coords[1] < gridHeight;
-}
+};
 
 var dirs = [
     [-1, -1],   // NW
@@ -196,7 +196,7 @@ grid.neighbors = function neighbors (coords) {
         }
     }
     return neighbors;
-}
+};
 
 grid.canSwap = function canSwap (source, target) {
     if (!grid.inBounds(source) || !grid.inBounds(target)) {
@@ -207,14 +207,18 @@ grid.canSwap = function canSwap (source, target) {
     unpack(grid.peek(source), s);
     unpack(grid.peek(target), t);
     return t[DATA_TYPE] === TILE_NONE || tiles[t[DATA_TYPE]].density < tiles[s[DATA_TYPE]].density;
-}
+};
 
 grid.add = function add (coords, vec) {
     if (!(coords instanceof Array) || !(vec instanceof Array)) {
         throw new Error('coords and addition vector must be an array');
     }
     return [coords[0] + vec[0], coords[1] + vec[1]];
-}
+};
+
+grid.flipUpdated = function flipUpdated (coords) {
+    grid.put(coords, grid.peek(coords) ^ 1);
+};
 
 function handleMouseInput (event) {
     if (event.type === 'mousemove') {
@@ -228,6 +232,8 @@ function handleMouseInput (event) {
     game.mouse.ctrl = event.ctrlKey;
     game.mouse.alt = event.altKey;
 }
+
+var toggleDirs = [dir.W, dir.E, dir.SW, dir.SE];
 
 var DATA_TYPE = 0;
 var DATA_TEMP = 1;
@@ -244,19 +250,73 @@ tiles[TILE_BLOCK] = {
     color: 'gray',
     density: Infinity,
     fixed: true,
-    fluid: false
+    fluid: false,
+    draw: function (ctx, coords, tile) {
+        var screenCoords = gridToScreenCoords(coords);
+        ctx.fillStyle = tiles[tile[DATA_TYPE]].color;
+        ctx.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
+    }
 };
 tiles[TILE_WATER] = {
     color: 'lightblue',
     density: 1.0,
     fixed: false,
-    fluid: true
+    fluid: true,
+    colors: [
+        '#74ccf4',
+        '#74ccf4',
+        '#5abcd8',
+        '#1ca3ec',
+        '#2389da',
+        '#2389da',
+        '#2389da',
+        '#2389da'
+    ],
+    update: function (coords, tile, neighbors, grid) {
+        var ds = [dirs[dir.S], dirs[toggleDirs[2 + game.tick % 2]], dirs[toggleDirs[2 + (game.tick + 1) % 2]]];
+        for (var i = 0; i < ds.length; i++) {
+            var target = grid.add(coords, ds[i]);
+            if (grid.canSwap(coords, target)) {
+                grid.flipUpdated(coords);
+                grid.swap(coords, target);
+
+                return;
+            }
+        }
+
+        if (neighbors[dir.N] === null) { return; }
+        var above = [];
+        unpack(neighbors[dir.N], above);
+        if (above[DATA_TYPE] === TILE_WATER) {
+            for (i = 0; i < 2; i++) {
+                if (grid.canSwap(coords, grid.add(coords, dirs[toggleDirs[i]]))) {
+                    grid.flipUpdated(coords);
+                    grid.swap(coords, grid.add(coords, dirs[toggleDirs[i]]));
+
+                    return;
+                }
+            }
+
+            tile[DATA_PRESSURE] = Math.min(7, above[DATA_PRESSURE] + 1);
+            grid.put(coords, pack(tile));
+        }
+
+        if (neighbors[dir.S] === null) {
+            grid.clear(coords);
+        }
+    },
+    draw: function (ctx, coords, tile) {
+        var screenCoords = gridToScreenCoords(coords);
+        ctx.fillStyle = tiles[tile[DATA_TYPE]].colors[tile[DATA_PRESSURE]];
+        ctx.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
+    }
 };
 tiles[TILE_OIL] = {
     color: 'purple',
     density: 0.8,
     fixed: false,
-    fluid: true
+    fluid: true,
+    update: function (coords, tile, neighbors, grid) {}
 };
 
 function processInput () {
@@ -298,25 +358,7 @@ function update (dt) {
                 continue;
             }
 
-            var neighbors = grid.neighbors([x, y]);
-            var swapDirs = [dir.S, tickDirs[2 + (game.tick % 2)], tickDirs[2 + ((game.tick + 1) % 2)], tickDirs[game.tick % 2], tickDirs[(game.tick + 1) % 2]];
-            var swapDir = null;
-
-            for (var i = 0; i < swapDirs.length; i++) {
-                if (grid.inBounds(grid.add(coords, dirs[swapDirs[i]])) && grid.canSwap(coords, grid.add(coords, dirs[swapDirs[i]]))) {
-                    swapDir = swapDirs[i];
-                    break;
-                }
-            }
-
-            if (swapDir === null && neighbors[dir.S] === null) {
-                grid.clear(coords);  // fall off the map
-                continue;
-            } else if (swapDir) {
-                grid.put(coords, tile.packedValue ^ 1);
-                grid.swap(coords, grid.add(coords, dirs[swapDir]));
-                grid.put(coords, grid.peek(coords) ^ 1);
-            }
+            tiles[tile[DATA_TYPE]].update(coords, tile, grid.neighbors(coords), grid);
         }
     }
 }
@@ -330,9 +372,7 @@ function render (t) {
         for (var x = 0; x < grid[y].length; x++) {
             unpack(grid.peek([x, y]), tile);
             if (tile[DATA_TYPE] !== TILE_NONE) {
-                var screenCoords = gridToScreenCoords([x, y]);
-                ctx.stage.fillStyle = tiles[tile[0]].color;
-                ctx.stage.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
+                tiles[tile[DATA_TYPE]].draw(ctx.stage, [x, y], tile);
             }
         }
     }
