@@ -230,11 +230,7 @@ tiles[TILE_WATER] = {
     },
     draw: function (ctx, coords, tile) {
         var screenCoords = gridToScreenCoords(coords);
-        if (tile[dataTools.DATA_STATIC]) {
-            ctx.fillStyle = 'red';
-        } else {
-            ctx.fillStyle = tiles[tile[dataTools.DATA_TYPE]].colors[tile[dataTools.DATA_PRESSURE]];
-        }
+        ctx.fillStyle = tiles[tile[dataTools.DATA_TYPE]].colors[tile[dataTools.DATA_PRESSURE]];
         ctx.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
     }
 };
