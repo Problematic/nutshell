@@ -18,4 +18,5 @@ html, body {
 
 #stage {
     pointer-events: all;
+    cursor: none;
 }

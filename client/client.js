@@ -315,8 +315,11 @@ function render (t) {
     }
 
     var coords = screenToGridCoords(game.mouse.position);
-    ctx.ui.clearRect(0, canvas.ui.height - 100, 200, canvas.ui.height);
+    var screenCoords = gridToScreenCoords(coords);  // drawing the cursor aligned to the grid square
+
+    ctx.ui.clearRect(0, 0, canvas.ui.width, canvas.ui.height);
     ctx.ui.fillStyle = 'white';
+    ctx.ui.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
     ctx.ui.fillText('FPS: ' + fps.toFixed(2), 15, canvas.ui.height - 15);
     ctx.ui.fillText('Grid Coords: (' + coords[0] + ',' + coords[1] + ')', 15, canvas.ui.height - 30);
 }
