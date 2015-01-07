@@ -85,25 +85,36 @@ for (var i = 0; i < Math.ceil(canvas.stage.width / game.gridNodeWidth); i++) {
     grid[i] = new Uint16Array(gridWidth);
 }
 
+var DATA_TYPE = 0;
+var DATA_TEMP = 1;
+var DATA_PRESSURE = 2;
+var DATA_STATIC = 3;
+var DATA_UPDATED = 4;
+
 function pack (vals) {
-    // array of format [T, E, P, U]
+    // array of format [T, -, P, S, U]
     // packs to a 16-bit number, in the following format:
-    // TTTT TTTT ---- PPPU
-    // where T = tile type, - = unused, U = last updated
+    // TTTT TTTT ---P PPSU
+    // where T = tile type, - = unused, S = static, U = last updated
 
     if (!(vals instanceof Array)) {
         throw new Error('vals must be an array');
     }
+    if (vals.length !== 5) {
+        throw new Error('vals must contain 5 elements');
+    }
 
-    var packed = (vals[0] << 8 | vals[1] << 4 | vals[2] << 1 | vals[3]);
+    var packed = (vals[DATA_TYPE] << 8 | vals[DATA_TEMP] << 5 | vals[DATA_PRESSURE] << 2 | vals[DATA_STATIC] << 1 | vals[DATA_UPDATED]);
     return packed;
 }
 
 function unpack (packed, out) {
-    out[0] = packed >> 8;
-    out[1] = (packed >> 4) & 0xf;
-    out[2] = (packed >> 1) & 7;
-    out[3] = packed & 1;
+    out[DATA_TYPE] = packed >> 8;
+    out[DATA_TEMP] = (packed >> 5) & 7;
+    out[DATA_PRESSURE] = (packed >> 2) & 7;
+    out[DATA_STATIC] = (packed >> 1) & 1;
+    out[DATA_UPDATED] = packed & 1;
+
     out.packedValue = packed;
 
     return out;
@@ -139,6 +150,10 @@ grid.swap = function swap (source, target) {
     var tmp = this[source[1]][source[0]];
     this[source[1]][source[0]] = this[target[1]][target[0]];
     this[target[1]][target[0]] = tmp;
+
+    // clear static flags, if any
+    tmp &= ~(1 << 2);
+    this[source[1]][source[0]] &= ~(1 << 2);
 };
 
 grid.peek = function peek (coords) {
@@ -198,6 +213,66 @@ grid.neighbors = function neighbors (coords) {
     return neighbors;
 };
 
+grid.neighborCoords = function neighborCoords (coords) {
+    var neighbors = [];
+    for (var i = 0; i < dirs.length; i++) {
+        var dir = [ coords[0] + dirs[i][0], coords[1] + dirs[i][1] ];
+        if (this.inBounds(dir)) {
+            neighbors[i] = dir;
+        } else {
+            neighbors[i] = null;
+        }
+    }
+    return neighbors;
+};
+
+floodProcess = {
+    ABORT: 0,
+    PROCESS: 1,
+    SKIP: 2,
+    END: 3,
+    0: 'ABORT',
+    1: 'PROCESS',
+    2: 'SKIP',
+    3: 'END'
+};
+grid.floodFill = function floodFill (start, process) {
+    var queue = [start];
+    var processed = [];
+    var current;
+    var status = floodProcess.CONTINUE;
+    var neighbors;
+
+    function isProcessed (coords) {
+        for (var i = 0; i < processed.length; i++) {
+            if (coords[0] === processed[i][0] && coords[1] === processed[i][1]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    while (queue.length) {
+        current = queue.pop();
+        status = process(current);
+        if (status === floodProcess.ABORT) {
+            return floodProcess.ABORT;
+        } else if (status === floodProcess.SKIP) {
+            continue;
+        }
+        processed.push(current);
+        neighbors = this.neighborCoords(current);
+        for (var i = 0; i < neighbors.length; i++) {
+            if (neighbors[i] === null) { continue; }
+            if (!isProcessed(neighbors[i])) {
+                queue.push(neighbors[i]);
+            }
+        }
+    }
+
+    return floodProcess.END;
+};
+
 grid.canSwap = function canSwap (source, target) {
     if (!grid.inBounds(source) || !grid.inBounds(target)) {
         return false;
@@ -220,6 +295,10 @@ grid.flipUpdated = function flipUpdated (coords) {
     grid.put(coords, grid.peek(coords) ^ 1);
 };
 
+grid.flipStatic = function flipStatic (coords) {
+    grid.put(coords, grid.peek(coords) ^ 2);
+};
+
 function handleMouseInput (event) {
     if (event.type === 'mousemove') {
         game.mouse.position = getMousePos(event);
@@ -234,11 +313,6 @@ function handleMouseInput (event) {
 }
 
 var toggleDirs = [dir.W, dir.E, dir.SW, dir.SE];
-
-var DATA_TYPE = 0;
-var DATA_TEMP = 1;
-var DATA_PRESSURE = 2;
-var DATA_UPDATED = 3;
 
 var TILE_NONE = 0;
 var TILE_BLOCK = 1;
@@ -267,15 +341,16 @@ tiles[TILE_WATER] = {
         '#74ccf4',
         '#5abcd8',
         '#1ca3ec',
+        '#1ca3ec',
         '#2389da',
         '#2389da',
-        '#2389da',
-        '#2389da'
+        '#0f5e9c'
     ],
     update: function (coords, tile, neighbors, grid) {
+        var target;
         var ds = [dirs[dir.S], dirs[toggleDirs[2 + game.tick % 2]], dirs[toggleDirs[2 + (game.tick + 1) % 2]]];
         for (var i = 0; i < ds.length; i++) {
-            var target = grid.add(coords, ds[i]);
+            target = grid.add(coords, ds[i]);
             if (grid.canSwap(coords, target)) {
                 grid.flipUpdated(coords);
                 grid.swap(coords, target);
@@ -284,21 +359,58 @@ tiles[TILE_WATER] = {
             }
         }
 
-        if (neighbors[dir.N] === null) { return; }
-        var above = [];
-        unpack(neighbors[dir.N], above);
-        if (above[DATA_TYPE] === TILE_WATER) {
+        var neighbor = [];
+        unpack(neighbors[dir.N], neighbor);
+        if (neighbor[DATA_TYPE] === TILE_WATER) {
             for (i = 0; i < 2; i++) {
-                if (grid.canSwap(coords, grid.add(coords, dirs[toggleDirs[i]]))) {
+                if (grid.canSwap(coords, grid.add(coords, dirs[toggleDirs[(game.tick + i) % 2]]))) {
                     grid.flipUpdated(coords);
-                    grid.swap(coords, grid.add(coords, dirs[toggleDirs[i]]));
+                    grid.swap(coords, grid.add(coords, dirs[toggleDirs[(game.tick + i) % 2]]));
 
                     return;
                 }
             }
 
-            tile[DATA_PRESSURE] = Math.min(7, above[DATA_PRESSURE] + 1);
+            tile[DATA_PRESSURE] = Math.min(7, neighbor[DATA_PRESSURE] + 1);
             grid.put(coords, pack(tile));
+        } else {
+            var neighborPressure = 0;
+
+            unpack(neighbors[dir.W], neighbor);
+            if (neighbor[DATA_TYPE] === TILE_WATER) {
+                neighborPressure += neighbor[DATA_PRESSURE];
+            }
+            unpack(neighbors[dir.E], neighbor);
+            if (neighbor[DATA_TYPE] === TILE_WATER) {
+                neighborPressure += neighbor[DATA_PRESSURE];
+            }
+
+            tile[DATA_PRESSURE] = Math.floor(neighborPressure / 2);
+            grid.put(coords, pack(tile));
+
+            unpack(neighbors[dir.S], neighbor);
+            if (neighbor[DATA_TYPE] === TILE_WATER && !neighbor[DATA_STATIC]) {
+                var targetLoc = grid.add(coords, dirs[dir.S]);
+                var check = [];
+
+                var result = grid.floodFill(targetLoc, function (loc) {
+                    if (loc[1] < coords[1]) {
+                        return floodProcess.SKIP;
+                    }
+
+                    unpack(grid.peek(loc), check);
+                    if (check[DATA_TYPE] === TILE_BLOCK) {
+                        return floodProcess.SKIP;
+                    } else if (check[DATA_TYPE] === TILE_NONE) {
+                        grid.swap(coords, loc);
+                        return floodProcess.ABORT;
+                    }
+                });
+
+                if (result === floodProcess.END) {
+                    grid.flipStatic(targetLoc);
+                }
+            }
         }
 
         if (neighbors[dir.S] === null) {
@@ -341,13 +453,11 @@ function update (dt) {
     var gridCoords = screenToGridCoords(game.mouse.position);
     if (game.player.isDrawing !== false) {
         if (game.player.isDrawing === 0 || unpack(grid.peek(gridCoords), scratch)[DATA_TYPE] === 0) {
-            grid.put(gridCoords, pack([game.player.isDrawing, 0, 0, (game.tick + 1) % 2]));
+            grid.put(gridCoords, pack([game.player.isDrawing, 0, 0, 0, (game.tick + 1) % 2]));
         }
     }
 
     var tile = [];
-    var target = [];
-    var tickDirs = [dir.W, dir.E, dir.SW, dir.SE];
     for (var y = grid.length - 1; y >= 0; y--) {
         for (var x = grid[y].length - 1; x >= 0; x--) {
             var coords = [x, y];
