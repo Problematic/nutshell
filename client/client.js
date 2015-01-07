@@ -200,17 +200,20 @@ var dir = {
     6: 'SW',
     7: 'W'
 };
-grid.neighbors = function neighbors (coords) {
-    var neighbors = [];
+grid.neighbors = function neighbors (coords, out) {
+    if (!out) {
+        throw new Error('Must provide an out array to neighbors');
+    }
+
     for (var i = 0; i < dirs.length; i++) {
         var dir = [ coords[0] + dirs[i][0], coords[1] + dirs[i][1] ];
         if (this.inBounds(dir)) {
-            neighbors[i] = this.peek(dir);
+            out[i] = this.peek(dir);
         } else {
-            neighbors[i] = null;
+            out[i] = null;
         }
     }
-    return neighbors;
+    return out;
 };
 
 grid.neighborCoords = function neighborCoords (coords) {
@@ -458,6 +461,7 @@ function update (dt) {
     }
 
     var tile = [];
+    var neighbors = [];
     for (var y = grid.length - 1; y >= 0; y--) {
         for (var x = grid[y].length - 1; x >= 0; x--) {
             var coords = [x, y];
@@ -468,7 +472,7 @@ function update (dt) {
                 continue;
             }
 
-            tiles[tile[DATA_TYPE]].update(coords, tile, grid.neighbors(coords), grid);
+            tiles[tile[DATA_TYPE]].update(coords, tile, grid.neighbors(coords, neighbors), grid);
         }
     }
 }
