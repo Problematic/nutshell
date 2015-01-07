@@ -152,8 +152,8 @@ grid.swap = function swap (source, target) {
     this[target[1]][target[0]] = tmp;
 
     // clear static flags, if any
-    tmp &= ~(1 << 2);
-    this[source[1]][source[0]] &= ~(1 << 2);
+    tmp &= ~(1 << 1);
+    this[source[1]][source[0]] &= ~(1 << 1);
 };
 
 grid.peek = function peek (coords) {
