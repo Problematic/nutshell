@@ -224,7 +224,7 @@ tiles[TILE_WATER] = {
                 var check = [];
 
                 var result = grid.floodFill(targetLoc, function (loc) {
-                    if (loc[1] < coords[1]) {
+                    if (loc[1] <= coords[1]) {
                         return grid.floodFill.SKIP;
                     }
 
