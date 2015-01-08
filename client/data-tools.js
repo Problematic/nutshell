@@ -11,7 +11,7 @@ module.exports = {
         // TTTT TTTT ---P PPSU
         // where T = tile type, - = unused, S = static, U = last updated
 
-        if (!(vals instanceof Array)) {
+        if (!Array.isArray(vals)) {
             throw new Error('vals must be an array');
         }
         if (vals.length !== 5) {

@@ -1,3 +1,5 @@
+var vec2 = require('gl-matrix').vec2;
+
 var canvas = {
     stage: document.getElementById('stage'),
     grid: document.getElementById('grid'),
@@ -82,7 +84,7 @@ var game = {
 
 var gridHeight = Math.ceil(canvas.stage.height / game.gridNodeHeight);
 var gridWidth = Math.ceil(canvas.stage.width / game.gridNodeWidth);
-var grid = require('./grid')(gridWidth, gridHeight);
+var grid = require('./grid')(gridWidth, gridHeight, Uint16Array);
 
 var dataTools = require('./data-tools');
 
@@ -163,10 +165,10 @@ tiles[TILE_WATER] = {
         '#0f5e9c'
     ],
     update: function (coords, tile, neighbors, grid) {
-        var target;
+        var target = [];
         var ds = [grid.directions[grid.direction.S], grid.directions[toggleDirs[2 + game.tick % 2]], grid.directions[toggleDirs[2 + (game.tick + 1) % 2]]];
         for (var i = 0; i < ds.length; i++) {
-            target = grid.add(coords, ds[i]);
+            vec2.add(target, coords, ds[i]);
             if (canSwap(coords, target)) {
                 grid.flipUpdated(coords);
                 grid.swap(coords, target);
@@ -176,12 +178,15 @@ tiles[TILE_WATER] = {
         }
 
         var neighbor = [];
-        dataTools.unpack(neighbors[grid.direction.N], neighbor);
+        var swapTarget = [];
+        dataTools.unpack(grid.peek(neighbors[grid.direction.N]), neighbor);
+
         if (neighbor[dataTools.DATA_TYPE] === TILE_WATER) {
             for (i = 0; i < 2; i++) {
-                if (canSwap(coords, grid.add(coords, grid.directions[toggleDirs[(game.tick + i) % 2]]))) {
+                vec2.add(swapTarget, coords, grid.directions[toggleDirs[(game.tick + i) % 2]]);
+                if (canSwap(coords, swapTarget)) {
                     grid.flipUpdated(coords);
-                    grid.swap(coords, grid.add(coords, grid.directions[toggleDirs[(game.tick + i) % 2]]));
+                    grid.swap(coords, swapTarget);
 
                     return;
                 }
@@ -192,11 +197,11 @@ tiles[TILE_WATER] = {
         } else {
             var neighborPressure = 0;
 
-            dataTools.unpack(neighbors[grid.direction.W], neighbor);
+            dataTools.unpack(grid.peek(neighbors[grid.direction.W]), neighbor);
             if (neighbor[dataTools.DATA_TYPE] === TILE_WATER) {
                 neighborPressure += neighbor[dataTools.DATA_PRESSURE];
             }
-            dataTools.unpack(neighbors[grid.direction.E], neighbor);
+            dataTools.unpack(grid.peek(neighbors[grid.direction.E]), neighbor);
             if (neighbor[dataTools.DATA_TYPE] === TILE_WATER) {
                 neighborPressure += neighbor[dataTools.DATA_PRESSURE];
             }
@@ -204,9 +209,10 @@ tiles[TILE_WATER] = {
             tile[dataTools.DATA_PRESSURE] = Math.floor(neighborPressure / 2);
             grid.put(coords, dataTools.pack(tile));
 
-            dataTools.unpack(neighbors[grid.direction.S], neighbor);
+            dataTools.unpack(grid.peek(neighbors[grid.direction.S]), neighbor);
+            var targetLoc = [];
             if (neighbor[dataTools.DATA_TYPE] === TILE_WATER && !neighbor[dataTools.DATA_STATIC]) {
-                var targetLoc = grid.add(coords, grid.directions[grid.direction.S]);
+                vec2.add(targetLoc, coords, grid.directions[grid.direction.S]);
                 var check = [];
 
                 var result = grid.floodFill(targetLoc, function (loc) {
@@ -218,6 +224,7 @@ tiles[TILE_WATER] = {
                     if (check[dataTools.DATA_TYPE] === TILE_BLOCK) {
                         return grid.floodFill.SKIP;
                     } else if (check[dataTools.DATA_TYPE] === TILE_NONE) {
+                        // grid.flipStatic(loc);
                         grid.swap(coords, loc);
                         return grid.floodFill.ABORT;
                     }
@@ -334,9 +341,10 @@ function render (t) {
     var tile = [];
     for (var y = 0; y < grid.length; y++) {
         for (var x = 0; x < grid[y].length; x++) {
-            dataTools.unpack(grid.peek([x, y]), tile);
+            var c = [x, y];
+            dataTools.unpack(grid.peek(c), tile);
             if (tile[dataTools.DATA_TYPE] !== TILE_NONE) {
-                tiles[tile[dataTools.DATA_TYPE]].draw(ctx.stage, [x, y], tile);
+                tiles[tile[dataTools.DATA_TYPE]].draw(ctx.stage, c, tile);
             }
         }
     }
