@@ -13,10 +13,6 @@ module.exports = function (width, height, ArrayConstructor) {
         var tmp = this[source[1]][source[0]];
         this[source[1]][source[0]] = this[target[1]][target[0]];
         this[target[1]][target[0]] = tmp;
-
-        // clear static flags, if any
-        tmp &= ~(1 << 1);
-        this[source[1]][source[0]] &= ~(1 << 1);
     };
 
     grid.peek = function peek (coords) {

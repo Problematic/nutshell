@@ -173,6 +173,10 @@ tiles[TILE_WATER] = {
                 grid.flipUpdated(coords);
                 grid.swap(coords, target);
 
+                // clear static flags, if any
+                grid[coords[1]][coords[0]] &= ~(1 << 1);
+                grid[target[1]][target[0]] &= ~(1 << 1);
+
                 return;
             }
         }
@@ -187,6 +191,10 @@ tiles[TILE_WATER] = {
                 if (canSwap(coords, swapTarget)) {
                     grid.flipUpdated(coords);
                     grid.swap(coords, swapTarget);
+
+                    // clear static flags, if any
+                    grid[coords[1]][coords[0]] &= ~(1 << 1);
+                    grid[swapTarget[1]][swapTarget[0]] &= ~(1 << 1);
 
                     return;
                 }
@@ -224,8 +232,12 @@ tiles[TILE_WATER] = {
                     if (check[dataTools.DATA_TYPE] === TILE_BLOCK) {
                         return grid.floodFill.SKIP;
                     } else if (check[dataTools.DATA_TYPE] === TILE_NONE) {
-                        // grid.flipStatic(loc);
                         grid.swap(coords, loc);
+
+                        // clear static flags, if any
+                        grid[coords[1]][coords[0]] &= ~(1 << 1);
+                        grid[loc[1]][loc[0]] &= ~(1 << 1);
+
                         return grid.floodFill.ABORT;
                     }
                 });
