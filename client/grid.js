@@ -127,13 +127,5 @@ module.exports = function (width, height, ArrayConstructor) {
     grid.floodFill.SKIP = 2;
     grid.floodFill.END = 3;
 
-    grid.flipUpdated = function flipUpdated (coords) {
-        grid.put(coords, grid.peek(coords) ^ 1);
-    };
-
-    grid.flipStatic = function flipStatic (coords) {
-        grid.put(coords, grid.peek(coords) ^ 2);
-    };
-
     return grid;
 };

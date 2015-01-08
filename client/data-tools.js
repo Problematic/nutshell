@@ -32,5 +32,13 @@ module.exports = {
         out.packedValue = packed;
 
         return out;
+    },
+
+    flipUpdated: function flipUpdated (value) {
+        return value ^ 1;
+    },
+
+    flipStatic: function flipStatic (value) {
+        return value ^ 2;
     }
 };

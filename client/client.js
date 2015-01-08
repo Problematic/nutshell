@@ -170,7 +170,7 @@ tiles[TILE_WATER] = {
         for (var i = 0; i < ds.length; i++) {
             vec2.add(target, coords, ds[i]);
             if (canSwap(coords, target)) {
-                grid.flipUpdated(coords);
+                grid.put(coords, dataTools.flipUpdated(grid.peek(coords)));
                 grid.swap(coords, target);
 
                 // clear static flags, if any
@@ -189,7 +189,7 @@ tiles[TILE_WATER] = {
             for (i = 0; i < 2; i++) {
                 vec2.add(swapTarget, coords, grid.directions[toggleDirs[(game.tick + i) % 2]]);
                 if (canSwap(coords, swapTarget)) {
-                    grid.flipUpdated(coords);
+                    grid.put(coords, dataTools.flipUpdated(grid.peek(coords)));
                     grid.swap(coords, swapTarget);
 
                     // clear static flags, if any
@@ -243,7 +243,7 @@ tiles[TILE_WATER] = {
                 });
 
                 if (result === grid.floodFill.END) {
-                    grid.flipStatic(targetLoc);
+                    grid.put(targetLoc, dataTools.flipStatic(grid.peek(targetLoc)));
                 }
             }
         }
