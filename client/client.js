@@ -11,6 +11,7 @@ var ctx = {
 };
 
 var stageBoundingRect;
+var gameAnimationFrame;
 
 function resizeCanvas () {
     for (var name in canvas) {
@@ -36,7 +37,7 @@ var lag = 0;
 var fps = 0;
 var fpsFilter = 50;
 function gameLoop () {
-    window.requestAnimationFrame(gameLoop);
+    gameAnimationFrame = window.requestAnimationFrame(gameLoop);
 
     var current = Date.now();
     var delta = current - last;
@@ -62,7 +63,7 @@ function gameLoop () {
 
     render(lag / UPDATE_INTERVAL);
 }
-window.requestAnimationFrame(gameLoop);
+gameAnimationFrame = window.requestAnimationFrame(gameLoop);
 
 var game = {
     tick: 0,
@@ -75,7 +76,8 @@ var game = {
     player: {
         blockType: 0,
         isDrawing: false
-    }
+    },
+    activeTile: 1
 };
 
 var gridHeight = Math.ceil(canvas.stage.height / game.gridNodeHeight);
@@ -131,6 +133,9 @@ var TILE_WATER = 2;
 var TILE_OIL = 3;
 
 var tiles = [];
+tiles[TILE_NONE] = {
+    color: 'black'
+};
 tiles[TILE_BLOCK] = {
     color: 'gray',
     density: Infinity,
@@ -239,25 +244,51 @@ tiles[TILE_OIL] = {
     density: 0.8,
     fixed: false,
     fluid: true,
-    update: function (coords, tile, neighbors, grid) {}
+    update: function (coords, tile, neighbors, grid) {},
+    draw: function (ctx, coords, tile) {
+        var screenCoords = gridToScreenCoords(coords);
+        ctx.fillStyle = tiles[tile[dataTools.DATA_TYPE]].colors[tile[dataTools.DATA_PRESSURE]];
+        ctx.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
+    }
 };
 
 function processInput () {
-    if (game.mouse.mouse1 && game.mouse.meta) {
-        game.player.isDrawing = TILE_NONE;
-    } else if (game.mouse.mouse1 && game.mouse.shift) {
-        game.player.isDrawing = TILE_WATER;
-    } else if (game.mouse.mouse1 && game.mouse.ctrl) {
-        game.player.isDrawing = TILE_OIL;
-    } else if (game.mouse.mouse1) {
-        game.player.isDrawing = TILE_BLOCK;
+    if (game.mouse.mouse1) {
+        game.player.isDrawing = game.activeTile;
     } else {
         game.player.isDrawing = false;
     }
 }
+function handleKeyboardInput(event){
+    //Saves the current map when ctrl-s is pressed
+    if(event.ctrlKey && String.fromCharCode(event.which).toLowerCase() === 's'){
+        event.preventDefault();
+        serveSaveFile();
+    }
+    //Check for up arrow to update active tile
+    if(event.keyCode === 38){
+        if(game.activeTile == tiles.length -1){
+            game.activeTile = 0;
+        }
+        else{
+            game.activeTile++;
+        }
+    }
+    // Check for down arrow to change active tile
+    if(event.keyCode === 40){
+        if(game.activeTile === 0){
+            game.activeTile = tiles.length -1;
+        }
+        else{
+            game.activeTile--;
+        }
+    }
+}
+
 canvas.stage.addEventListener('mousemove', handleMouseInput);
 canvas.stage.addEventListener('mousedown', handleMouseInput);
 canvas.stage.addEventListener('mouseup', handleMouseInput);
+window.addEventListener('keydown',handleKeyboardInput);
 
 function canSwap (source, target) {
     if (!grid.inBounds(source) || !grid.inBounds(target)) {
@@ -268,7 +299,7 @@ function canSwap (source, target) {
     dataTools.unpack(grid.peek(source), s);
     dataTools.unpack(grid.peek(target), t);
     return t[dataTools.DATA_TYPE] === TILE_NONE || tiles[t[dataTools.DATA_TYPE]].density < tiles[s[dataTools.DATA_TYPE]].density;
-};
+}
 
 var scratch = [];
 function update (dt) {
@@ -314,8 +345,50 @@ function render (t) {
     var screenCoords = gridToScreenCoords(coords);  // drawing the cursor aligned to the grid square
 
     ctx.ui.clearRect(0, 0, canvas.ui.width, canvas.ui.height);
-    ctx.ui.fillStyle = 'white';
+    ctx.ui.fillStyle = tiles[game.activeTile].color;
     ctx.ui.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
     ctx.ui.fillText('FPS: ' + fps.toFixed(2), 15, canvas.ui.height - 15);
     ctx.ui.fillText('Grid Coords: (' + coords[0] + ',' + coords[1] + ')', 15, canvas.ui.height - 30);
 }
+
+function serveSaveFile(){
+    var a = window.document.createElement('a');
+    a.href = window.URL.createObjectURL(new Blob([JSON.stringify(grid)],{type:'application/json'}));
+    a.download = 'grid.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+function loadGridFromFile(file){
+    var reader = new FileReader();
+    reader.onerror = function(err){
+        alert(err.message);
+    };
+    reader.onloadend = function(event){
+        window.cancelAnimationFrame(gameAnimationFrame);
+        var loadedGrid = JSON.parse(event.target.result);
+        for(var i = 0; i < loadedGrid.length; i++){
+            for(var j = 0; j < Object.keys(loadedGrid[i]).length; j++){
+                grid[i][j] = loadedGrid[i][j];
+            }
+            if(i == loadedGrid.length -1) {
+                render();
+                gameAnimationFrame = window.requestAnimationFrame(gameLoop);
+            }
+        }
+
+    };
+    reader.readAsText(file);
+}
+
+document.addEventListener('dragover',function(evt) {
+    evt.stopPropagation();
+    evt.preventDefault();
+    evt.dataTransfer.dropEffect = 'copy'; // Explicitly show this is a copy.
+},false);
+document.addEventListener('drop',function(evt) {
+    evt.stopPropagation();
+    evt.preventDefault();
+    var files = evt.dataTransfer.files;
+    loadGridFromFile(files[0]);
+}, false);
