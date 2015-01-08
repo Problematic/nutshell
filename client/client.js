@@ -347,6 +347,7 @@ function render (t) {
     ctx.ui.clearRect(0, 0, canvas.ui.width, canvas.ui.height);
     ctx.ui.fillStyle = tiles[game.activeTile].color;
     ctx.ui.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
+    ctx.ui.fillStyle = 'white';
     ctx.ui.fillText('FPS: ' + fps.toFixed(2), 15, canvas.ui.height - 15);
     ctx.ui.fillText('Grid Coords: (' + coords[0] + ',' + coords[1] + ')', 15, canvas.ui.height - 30);
 }
