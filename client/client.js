@@ -11,6 +11,7 @@ var ctx = {
 };
 
 var stageBoundingRect;
+var gameAnimationFrame;
 
 function resizeCanvas () {
     for (var name in canvas) {
@@ -36,7 +37,7 @@ var lag = 0;
 var fps = 0;
 var fpsFilter = 50;
 function gameLoop () {
-    window.requestAnimationFrame(gameLoop);
+    gameAnimationFrame = window.requestAnimationFrame(gameLoop);
 
     var current = Date.now();
     var delta = current - last;
@@ -62,7 +63,7 @@ function gameLoop () {
 
     render(lag / UPDATE_INTERVAL);
 }
-window.requestAnimationFrame(gameLoop);
+gameAnimationFrame = window.requestAnimationFrame(gameLoop);
 
 var game = {
     tick: 0,
@@ -319,3 +320,45 @@ function render (t) {
     ctx.ui.fillText('FPS: ' + fps.toFixed(2), 15, canvas.ui.height - 15);
     ctx.ui.fillText('Grid Coords: (' + coords[0] + ',' + coords[1] + ')', 15, canvas.ui.height - 30);
 }
+
+function serveSaveFile(){
+    var a = window.document.createElement('a');
+    a.href = window.URL.createObjectURL(new Blob([JSON.stringify(grid)],{type:'application/json'}));
+    a.download = 'grid.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+function loadGridFromFile(file){
+    var reader = new FileReader();
+    reader.onerror = function(err){
+        alert(err.message);
+    };
+    reader.onloadend = function(event){
+        window.cancelAnimationFrame(gameAnimationFrame);
+        var loadedGrid = JSON.parse(event.target.result);
+        for(var i = 0; i < loadedGrid.length; i++){
+            for(var j = 0; j < Object.keys(loadedGrid[i]).length; j++){
+                grid[i][j] = loadedGrid[i][j];
+            }
+            if(i == loadedGrid.length -1) {
+                render();
+                gameAnimationFrame = window.requestAnimationFrame(gameLoop);
+            }
+        }
+
+    };
+    reader.readAsText(file);
+}
+
+document.addEventListener('dragover',function(evt) {
+    evt.stopPropagation();
+    evt.preventDefault();
+    evt.dataTransfer.dropEffect = 'copy'; // Explicitly show this is a copy.
+},false);
+document.addEventListener('drop',function(evt) {
+    evt.stopPropagation();
+    evt.preventDefault();
+    var files = evt.dataTransfer.files;
+    loadGridFromFile(files[0]);
+}, false);
