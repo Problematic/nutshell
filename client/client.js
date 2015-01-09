@@ -32,43 +32,24 @@ canvas.stage.addEventListener('contextmenu', function (event) {
     return false;
 });
 
-var UPDATE_INTERVAL = 50;
-var LAG_CAP = 1000;
-var last = Date.now();
-var lag = 0;
 var fps = 0;
 var fpsFilter = 50;
-function gameLoop () {
-    gameAnimationFrame = window.requestAnimationFrame(gameLoop);
 
-    var current = Date.now();
-    var delta = current - last;
-    var frameFPS = 1000 / delta;
+var loop = new (require('helixjs'))({
+    updateInterval: 50
+});
+
+loop.on('preUpdate', processInput);
+loop.on('preUpdate', function (dt) {
+    var frameFPS = 1000 / dt;
     fps += (frameFPS - fps) / fpsFilter;
-    last = current;
-    lag += delta;
+});
+loop.on('update', update);
+loop.on('render', render);
 
-    processInput();
-
-    if (lag > LAG_CAP) {
-        // if we're out of focus, rAF doesn't keep ticking, so lag can get
-        // very large and take a long time to simulate (during which time
-        // everything is locked up from the user's perspective)
-        console.log('Shortening lag from', lag, 'to lag cap', LAG_CAP);
-        lag = LAG_CAP;
-    }
-    while (lag >= UPDATE_INTERVAL) {
-        game.tick++;
-        update(UPDATE_INTERVAL / 1000);
-        lag -= UPDATE_INTERVAL;
-    }
-
-    render(lag / UPDATE_INTERVAL);
-}
-gameAnimationFrame = window.requestAnimationFrame(gameLoop);
+loop.start();
 
 var game = {
-    tick: 0,
     gridNodeWidth: 10,
     gridNodeHeight: 10,
     mouse: {
@@ -166,7 +147,7 @@ tiles[TILE_WATER] = {
     ],
     update: function (coords, tile, neighbors, grid) {
         var target = [];
-        var ds = [grid.directions[grid.direction.S], grid.directions[toggleDirs[2 + game.tick % 2]], grid.directions[toggleDirs[2 + (game.tick + 1) % 2]]];
+        var ds = [grid.directions[grid.direction.S], grid.directions[toggleDirs[2 + loop.tick % 2]], grid.directions[toggleDirs[2 + (loop.tick + 1) % 2]]];
         for (var i = 0; i < ds.length; i++) {
             vec2.add(target, coords, ds[i]);
             if (canSwap(coords, target)) {
@@ -187,7 +168,7 @@ tiles[TILE_WATER] = {
 
         if (neighbor[dataTools.DATA_TYPE] === TILE_WATER) {
             for (i = 0; i < 2; i++) {
-                vec2.add(swapTarget, coords, grid.directions[toggleDirs[(game.tick + i) % 2]]);
+                vec2.add(swapTarget, coords, grid.directions[toggleDirs[(loop.tick + i) % 2]]);
                 if (canSwap(coords, swapTarget)) {
                     grid.put(coords, dataTools.flipUpdated(grid.peek(coords)));
                     grid.swap(coords, swapTarget);
@@ -321,11 +302,11 @@ function canSwap (source, target) {
 }
 
 var scratch = [];
-function update (dt) {
+function update (fdt) {
     var gridCoords = screenToGridCoords(game.mouse.position);
     if (game.player.isDrawing !== false) {
         if (game.player.isDrawing === 0 || dataTools.unpack(grid.peek(gridCoords), scratch)[dataTools.DATA_TYPE] === 0) {
-            grid.put(gridCoords, dataTools.pack([game.player.isDrawing, 0, 0, 0, (game.tick + 1) % 2]));
+            grid.put(gridCoords, dataTools.pack([game.player.isDrawing, 0, 0, 0, (loop.tick + 1) % 2]));
         }
     }
 
@@ -337,7 +318,7 @@ function update (dt) {
 
             dataTools.unpack(grid.peek(coords), tile);
 
-            if (tile[dataTools.DATA_UPDATED] === game.tick % 2 || tile[dataTools.DATA_TYPE] === TILE_NONE || tiles[tile[dataTools.DATA_TYPE]].fixed) {
+            if (tile[dataTools.DATA_UPDATED] === loop.tick % 2 || tile[dataTools.DATA_TYPE] === TILE_NONE || tiles[tile[dataTools.DATA_TYPE]].fixed) {
                 continue;
             }
 

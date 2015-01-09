@@ -6,7 +6,8 @@
   "dependencies": {
     "browserify-middleware": "^4.1.0",
     "express": "^4.10.7",
-    "gl-matrix": "^2.1.0"
+    "gl-matrix": "^2.1.0",
+    "helixjs": "^1.0.3"
   },
   "devDependencies": {
     "chai": "^1.10.0",
