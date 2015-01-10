@@ -1,0 +1,108 @@
+{
+    "air": {
+        "id": 0,
+        "color": "rgba(255, 255, 255, .25)",
+        "density": 1.27,
+        "traits": ["gas", "empty"]
+    },
+    "bedrock": {
+        "id": 1,
+        "color": "gray",
+        "density": -1,
+        "traits": ["indestructible", "solid"]
+    },
+    "water": {
+        "id": 2,
+        "color": "blue",
+        "density": 1000,
+        "traits": ["liquid"],
+        "transitions": [
+            {
+                "to": "ice",
+                "attribute": "temperature",
+                "comparator": "lte",
+                "value": 273.15
+            },
+            {
+                "to": "steam",
+                "attribute": "temperature",
+                "comparator": "gt",
+                "value": 373.15
+            }
+        ]
+    },
+    "ice": {
+        "id": 3,
+        "color": "lightblue",
+        "density": 917,
+        "traits": ["cooler", "solid"],
+        "transitions": [
+            {
+                "to": "water",
+                "attribute": "temperature",
+                "comparator": "gt",
+                "value": 273.15
+            }
+        ]
+    },
+    "steam": {
+        "id": 4,
+        "color": "lightgray",
+        "density": 0.804,
+        "traits": ["gas"],
+        "transitions": [
+            {
+                "to": "water",
+                "attribute": "temperature",
+                "comparator": "lte",
+                "value": 373.15
+            }
+        ]
+    },
+    "oil": {
+        "id": 5,
+        "color": "purple",
+        "density": 890,
+        "traits": ["liquid", "flammable"]
+    },
+    "stone": {
+        "id": 6,
+        "color": "darkgray",
+        "density": 2800,
+        "traits": ["solid"],
+        "transitions": [
+            {
+                "to": "lava",
+                "attribute": "temperature",
+                "comparator": "gt",
+                "value": 1473.15
+            }
+        ]
+    },
+    "lava": {
+        "id": 7,
+        "color": "orange",
+        "density": 2500,
+        "traits": ["viscous", "heater"],
+        "transitions": [
+            {
+                "to": "stone",
+                "attribute": "temperature",
+                "comparator": "lte",
+                "value": 1473.15
+            }
+        ]
+    },
+    "sand": {
+        "id": 8,
+        "color": "beige",
+        "density": 1280,
+        "traits": ["particulate"]
+    },
+    "glass": {
+        "id": 9,
+        "color": "aliceblue",
+        "density": 2400,
+        "traits": ["solid"]
+    }
+}

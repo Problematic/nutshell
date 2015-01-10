@@ -21,7 +21,7 @@ function resizeCanvas () {
         canvas[name].height = window.innerHeight;
     }
 
-    drawGrid(ctx.grid);
+    setTimeout(drawGrid, 0);
     stageBoundingRect = canvas.stage.getBoundingClientRect();
 }
 window.addEventListener('resize', resizeCanvas, false);
@@ -35,9 +35,11 @@ canvas.stage.addEventListener('contextmenu', function (event) {
 var fps = 0;
 var fpsFilter = 50;
 
-var loop = new (require('helixjs'))({
+var loop = new (require('helix-loop'))({
     updateInterval: 50
 });
+
+loop.on('start', drawGrid);
 
 loop.on('preUpdate', processInput);
 loop.on('preUpdate', function (dt) {
@@ -45,7 +47,9 @@ loop.on('preUpdate', function (dt) {
     fps += (frameFPS - fps) / fpsFilter;
 });
 loop.on('update', update);
+
 loop.on('render', render);
+loop.on('render', drawUI);
 
 loop.start();
 
@@ -56,11 +60,8 @@ var game = {
         position: [0, 0],
         mouse1: false
     },
-    player: {
-        blockType: 0,
-        isDrawing: false
-    },
-    activeTile: 1
+    keyboard: new (require('./input/Keyboard'))(window),
+    drawTile: 1
 };
 
 var gridHeight = Math.ceil(canvas.stage.height / game.gridNodeHeight);
@@ -69,20 +70,29 @@ var grid = require('./grid')(gridWidth, gridHeight, Uint16Array);
 
 var dataTools = require('./data-tools');
 
-function drawGrid(ctx) {
+var fs = require('fs');
+var tileTypes = JSON.parse(fs.readFileSync(__dirname + '/../data/tiles.json', 'utf8'));
+
+var tileNames = Object.keys(tileTypes);
+var tileLookup = [];
+var tileCount = tileNames.length;
+for (var i = 0; i < tileNames.length; i++) {
+    tileLookup[tileTypes[tileNames[i]].id] = tileNames[i];
+}
+
+function drawGrid() {
     for (var x = 0; x < gridHeight; x++) {
-        ctx.moveTo(0, x * game.gridNodeHeight + 0.5);
-        ctx.lineTo(canvas.stage.width, x * game.gridNodeHeight + 0.5);
+        ctx.grid.moveTo(0, x * game.gridNodeHeight + 0.5);
+        ctx.grid.lineTo(canvas.stage.width, x * game.gridNodeHeight + 0.5);
     }
     for (var y = 0; y < gridWidth; y++) {
-        ctx.moveTo(y * game.gridNodeWidth + 0.5, 0);
-        ctx.lineTo(y * game.gridNodeWidth + 0.5, canvas.stage.height);
+        ctx.grid.moveTo(y * game.gridNodeWidth + 0.5, 0);
+        ctx.grid.lineTo(y * game.gridNodeWidth + 0.5, canvas.stage.height);
     }
 
-    ctx.strokeStyle = '#333333';
-    ctx.stroke();
+    ctx.grid.strokeStyle = '#333333';
+    ctx.grid.stroke();
 }
-drawGrid(ctx.grid);
 
 function getMousePos (event) {
     return [event.clientX - stageBoundingRect.left, event.clientY - stageBoundingRect.top];
@@ -101,186 +111,19 @@ function handleMouseInput (event) {
     } else {
         game.mouse['mouse' + event.which] = event.type === 'mousedown';
     }
-
-    game.mouse.shift = event.shiftKey;
-    game.mouse.meta = event.metaKey;
-    game.mouse.ctrl = event.ctrlKey;
-    game.mouse.alt = event.altKey;
 }
-
-var toggleDirs = [grid.direction.W, grid.direction.E, grid.direction.SW, grid.direction.SE];
-
-var TILE_NONE = 0;
-var TILE_BLOCK = 1;
-var TILE_WATER = 2;
-var TILE_OIL = 3;
-
-var tiles = [];
-tiles[TILE_NONE] = {
-    color: 'black'
-};
-tiles[TILE_BLOCK] = {
-    color: 'gray',
-    density: Infinity,
-    fixed: true,
-    fluid: false,
-    draw: function (ctx, coords, tile) {
-        var screenCoords = gridToScreenCoords(coords);
-        ctx.fillStyle = tiles[tile[dataTools.DATA_TYPE]].color;
-        ctx.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
-    }
-};
-tiles[TILE_WATER] = {
-    color: 'lightblue',
-    density: 1.0,
-    fixed: false,
-    fluid: true,
-    colors: [
-        '#74ccf4',
-        '#74ccf4',
-        '#5abcd8',
-        '#1ca3ec',
-        '#1ca3ec',
-        '#2389da',
-        '#2389da',
-        '#0f5e9c'
-    ],
-    update: function (coords, tile, neighbors, grid) {
-        var target = [];
-        var ds = [grid.directions[grid.direction.S], grid.directions[toggleDirs[2 + loop.tick % 2]], grid.directions[toggleDirs[2 + (loop.tick + 1) % 2]]];
-        for (var i = 0; i < ds.length; i++) {
-            vec2.add(target, coords, ds[i]);
-            if (canSwap(coords, target)) {
-                grid.put(coords, dataTools.flipUpdated(grid.peek(coords)));
-                grid.swap(coords, target);
-
-                // clear static flags, if any
-                grid[coords[1]][coords[0]] &= ~(1 << 1);
-                grid[target[1]][target[0]] &= ~(1 << 1);
-
-                return;
-            }
-        }
-
-        var neighbor = [];
-        var swapTarget = [];
-        dataTools.unpack(grid.peek(neighbors[grid.direction.N]), neighbor);
-
-        if (neighbor[dataTools.DATA_TYPE] === TILE_WATER) {
-            for (i = 0; i < 2; i++) {
-                vec2.add(swapTarget, coords, grid.directions[toggleDirs[(loop.tick + i) % 2]]);
-                if (canSwap(coords, swapTarget)) {
-                    grid.put(coords, dataTools.flipUpdated(grid.peek(coords)));
-                    grid.swap(coords, swapTarget);
-
-                    // clear static flags, if any
-                    grid[coords[1]][coords[0]] &= ~(1 << 1);
-                    grid[swapTarget[1]][swapTarget[0]] &= ~(1 << 1);
-
-                    return;
-                }
-            }
-
-            tile[dataTools.DATA_PRESSURE] = Math.min(7, neighbor[dataTools.DATA_PRESSURE] + 1);
-            grid.put(coords, dataTools.pack(tile));
-        } else {
-            var neighborPressure = 0;
-
-            dataTools.unpack(grid.peek(neighbors[grid.direction.W]), neighbor);
-            if (neighbor[dataTools.DATA_TYPE] === TILE_WATER) {
-                neighborPressure += neighbor[dataTools.DATA_PRESSURE];
-            }
-            dataTools.unpack(grid.peek(neighbors[grid.direction.E]), neighbor);
-            if (neighbor[dataTools.DATA_TYPE] === TILE_WATER) {
-                neighborPressure += neighbor[dataTools.DATA_PRESSURE];
-            }
-
-            tile[dataTools.DATA_PRESSURE] = Math.floor(neighborPressure / 2);
-            grid.put(coords, dataTools.pack(tile));
-
-            dataTools.unpack(grid.peek(neighbors[grid.direction.S]), neighbor);
-            var targetLoc = [];
-            if (neighbor[dataTools.DATA_TYPE] === TILE_WATER && !neighbor[dataTools.DATA_STATIC]) {
-                vec2.add(targetLoc, coords, grid.directions[grid.direction.S]);
-                var check = [];
-
-                var result = grid.floodFill(targetLoc, function (loc) {
-                    if (loc[1] <= coords[1]) {
-                        return grid.floodFill.SKIP;
-                    }
-
-                    dataTools.unpack(grid.peek(loc), check);
-                    if (check[dataTools.DATA_TYPE] === TILE_BLOCK) {
-                        return grid.floodFill.SKIP;
-                    } else if (check[dataTools.DATA_TYPE] === TILE_NONE) {
-                        grid.swap(coords, loc);
-
-                        // clear static flags, if any
-                        grid[coords[1]][coords[0]] &= ~(1 << 1);
-                        grid[loc[1]][loc[0]] &= ~(1 << 1);
-
-                        return grid.floodFill.ABORT;
-                    }
-                });
-
-                if (result === grid.floodFill.END) {
-                    grid.put(targetLoc, dataTools.flipStatic(grid.peek(targetLoc)));
-                }
-            }
-        }
-
-        if (neighbors[grid.direction.S] === null) {
-            grid.clear(coords);
-        }
-    },
-    draw: function (ctx, coords, tile) {
-        var screenCoords = gridToScreenCoords(coords);
-        ctx.fillStyle = tiles[tile[dataTools.DATA_TYPE]].colors[tile[dataTools.DATA_PRESSURE]];
-        ctx.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
-    }
-};
-tiles[TILE_OIL] = {
-    color: 'purple',
-    density: 0.8,
-    fixed: false,
-    fluid: true,
-    update: function (coords, tile, neighbors, grid) {},
-    draw: function (ctx, coords, tile) {
-        var screenCoords = gridToScreenCoords(coords);
-        ctx.fillStyle = tiles[tile[dataTools.DATA_TYPE]].colors[tile[dataTools.DATA_PRESSURE]];
-        ctx.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
-    }
-};
 
 function processInput () {
-    if (game.mouse.mouse1) {
-        game.player.isDrawing = game.activeTile;
-    } else {
-        game.player.isDrawing = false;
-    }
-}
-function handleKeyboardInput(event){
-    //Saves the current map when ctrl-s is pressed
-    if(event.ctrlKey && String.fromCharCode(event.which).toLowerCase() === 's'){
-        event.preventDefault();
-        serveSaveFile();
-    }
-    //Check for up arrow to update active tile
-    if(event.keyCode === 38){
-        if(game.activeTile == tiles.length -1){
-            game.activeTile = 0;
-        }
-        else{
-            game.activeTile++;
-        }
-    }
-    // Check for down arrow to change active tile
-    if(event.keyCode === 40){
-        if(game.activeTile === 0){
-            game.activeTile = tiles.length -1;
-        }
-        else{
-            game.activeTile--;
+    if (game.mouse.mouse1) {}
+
+    if (game.keyboard.isKeyFirstDown(game.keyboard.Keymap.TAB)) {
+        if (game.keyboard.isKeyDown(game.keyboard.Keymap.SHIFT)) {
+            game.drawTile--;
+            if (game.drawTile < 0) {
+                game.drawTile = tileCount - 1;
+            }
+        } else {
+            game.drawTile = (game.drawTile + 1) % tileCount;
         }
     }
 }
@@ -288,69 +131,70 @@ function handleKeyboardInput(event){
 canvas.stage.addEventListener('mousemove', handleMouseInput);
 canvas.stage.addEventListener('mousedown', handleMouseInput);
 canvas.stage.addEventListener('mouseup', handleMouseInput);
-window.addEventListener('keydown',handleKeyboardInput);
 
-function canSwap (source, target) {
-    if (!grid.inBounds(source) || !grid.inBounds(target)) {
-        return false;
-    }
-    var s = [];
-    var t = [];
-    dataTools.unpack(grid.peek(source), s);
-    dataTools.unpack(grid.peek(target), t);
-    return t[dataTools.DATA_TYPE] === TILE_NONE || tiles[t[dataTools.DATA_TYPE]].density < tiles[s[dataTools.DATA_TYPE]].density;
-}
-
-var scratch = [];
 function update (fdt) {
-    var gridCoords = screenToGridCoords(game.mouse.position);
-    if (game.player.isDrawing !== false) {
-        if (game.player.isDrawing === 0 || dataTools.unpack(grid.peek(gridCoords), scratch)[dataTools.DATA_TYPE] === 0) {
-            grid.put(gridCoords, dataTools.pack([game.player.isDrawing, 0, 0, 0, (loop.tick + 1) % 2]));
-        }
-    }
-
     var tile = [];
     var neighbors = [];
     for (var y = grid.length - 1; y >= 0; y--) {
         for (var x = grid[y].length - 1; x >= 0; x--) {
             var coords = [x, y];
-
-            dataTools.unpack(grid.peek(coords), tile);
-
-            if (tile[dataTools.DATA_UPDATED] === loop.tick % 2 || tile[dataTools.DATA_TYPE] === TILE_NONE || tiles[tile[dataTools.DATA_TYPE]].fixed) {
-                continue;
-            }
-
-            tiles[tile[dataTools.DATA_TYPE]].update(coords, tile, grid.neighbors(coords, neighbors), grid);
         }
     }
 }
 
+function drawUI (t) {
+    var coords = screenToGridCoords(game.mouse.position);
+    var screenCoords = gridToScreenCoords(coords);  // drawing the cursor aligned to the grid square
+
+    ctx.ui.clearRect(0, 0, canvas.ui.width, canvas.ui.height);
+
+    ctx.ui.fillStyle = tileTypes[tileLookup[game.drawTile]].color;
+    ctx.ui.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
+    ctx.ui.fillStyle = 'white';
+    ctx.ui.fillText('FPS: ' + fps.toFixed(2), 15, canvas.ui.height - 15);
+    ctx.ui.fillText('Grid Coords: (' + coords[0] + ',' + coords[1] + ')', 15, canvas.ui.height - 30);
+
+    var tileCount = tileLookup.length;
+    var switcherTileSize = 25;
+    var switcherPadding = 25;
+    var switcherMargin = 25;
+
+    var switcherWidth = switcherTileSize * tileCount + (switcherPadding / 4 * tileCount);
+    var switcherHeight = 50;
+
+    var switcherX = canvas.ui.width - switcherWidth - switcherMargin;
+    var switcherY = canvas.ui.height - switcherHeight - switcherMargin;
+
+    ctx.ui.strokeStyle = 'white';
+    ctx.ui.lineWidth = 2;
+    for (var i = 0; i < tileLookup.length; i++) {
+        var tile = tileTypes[tileLookup[i]];
+        ctx.ui.fillStyle = tile.color;
+
+        ctx.ui.beginPath();
+        ctx.ui.rect(switcherX + switcherTileSize * i + (switcherPadding / 4 * i), switcherY + switcherTileSize / 2, switcherTileSize, switcherTileSize);
+        ctx.ui.fill();
+        if (game.drawTile === i) {
+            ctx.ui.stroke();
+        }
+    }
+
+    ctx.ui.fillStyle = 'white';
+    ctx.ui.fillText('Current tile: ' + tileLookup[game.drawTile], switcherX, switcherY + switcherHeight + switcherPadding / 2);
+}
+
 function render (t) {
+    var coords;
+
     ctx.stage.fillStyle = 'black';
     ctx.stage.fillRect(0, 0, canvas.stage.width, canvas.stage.height);
 
     var tile = [];
     for (var y = 0; y < grid.length; y++) {
         for (var x = 0; x < grid[y].length; x++) {
-            var c = [x, y];
-            dataTools.unpack(grid.peek(c), tile);
-            if (tile[dataTools.DATA_TYPE] !== TILE_NONE) {
-                tiles[tile[dataTools.DATA_TYPE]].draw(ctx.stage, c, tile);
-            }
+            coords = [x, y];
         }
     }
-
-    var coords = screenToGridCoords(game.mouse.position);
-    var screenCoords = gridToScreenCoords(coords);  // drawing the cursor aligned to the grid square
-
-    ctx.ui.clearRect(0, 0, canvas.ui.width, canvas.ui.height);
-    ctx.ui.fillStyle = tiles[game.activeTile].color;
-    ctx.ui.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
-    ctx.ui.fillStyle = 'white';
-    ctx.ui.fillText('FPS: ' + fps.toFixed(2), 15, canvas.ui.height - 15);
-    ctx.ui.fillText('Grid Coords: (' + coords[0] + ',' + coords[1] + ')', 15, canvas.ui.height - 30);
 }
 
 function serveSaveFile(){
