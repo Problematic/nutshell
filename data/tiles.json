@@ -3,17 +3,18 @@
         "id": 0,
         "color": "rgba(255, 255, 255, .25)",
         "density": 1.27,
-        "traits": ["gas", "empty"]
+        "baseTemperature": 295,
+        "traits": ["empty"]
     },
     "bedrock": {
         "id": 1,
-        "color": "gray",
+        "color": "#434343",
         "density": -1,
-        "traits": ["indestructible", "solid"]
+        "traits": ["indestructible", "solid", "immobile"]
     },
     "water": {
         "id": 2,
-        "color": "blue",
+        "color": "rgba(0, 47, 190, 0.95)",
         "density": 1000,
         "traits": ["liquid"],
         "transitions": [
@@ -33,9 +34,10 @@
     },
     "ice": {
         "id": 3,
-        "color": "lightblue",
+        "color": "rgba(81, 130, 211, 0.81)",
         "density": 917,
-        "traits": ["cooler", "solid"],
+        "traits": ["cooler", "solid", "structural"],
+        "baseTemperature": 265,
         "transitions": [
             {
                 "to": "water",
@@ -47,7 +49,7 @@
     },
     "steam": {
         "id": 4,
-        "color": "lightgray",
+        "color": "rgba(128, 128, 128, 0.75)",
         "density": 0.804,
         "traits": ["gas"],
         "transitions": [
@@ -69,7 +71,7 @@
         "id": 6,
         "color": "darkgray",
         "density": 2800,
-        "traits": ["solid"],
+        "traits": ["solid", "structural"],
         "transitions": [
             {
                 "to": "lava",
@@ -84,6 +86,7 @@
         "color": "orange",
         "density": 2500,
         "traits": ["viscous", "heater"],
+        "baseTemperature": 2000,
         "transitions": [
             {
                 "to": "stone",
@@ -97,12 +100,12 @@
         "id": 8,
         "color": "beige",
         "density": 1280,
-        "traits": ["particulate"]
-    },
+        "traits": ["solid", "particulate"]
+    }/*,
     "glass": {
         "id": 9,
         "color": "aliceblue",
         "density": 2400,
         "traits": ["solid"]
-    }
+    }*/
 }

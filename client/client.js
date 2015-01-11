@@ -1,15 +1,18 @@
 var vec2 = require('gl-matrix').vec2;
+var seedrandom = require('seedrandom');
 
 var canvas = {
     stage: document.getElementById('stage'),
     grid: document.getElementById('grid'),
-    ui: document.getElementById('ui')
+    ui: document.getElementById('ui'),
+    debug: document.getElementById('debug')
 };
 
 var ctx = {
     stage: canvas.stage.getContext('2d'),
     grid: canvas.grid.getContext('2d'),
-    ui: canvas.ui.getContext('2d')
+    ui: canvas.ui.getContext('2d'),
+    debug: canvas.debug.getContext('2d')
 };
 
 var stageBoundingRect;
@@ -32,7 +35,7 @@ canvas.stage.addEventListener('contextmenu', function (event) {
     return false;
 });
 
-var fps = 0;
+var fps = 60;
 var fpsFilter = 50;
 
 var loop = new (require('helix-loop'))({
@@ -61,24 +64,43 @@ var game = {
         mouse1: false
     },
     keyboard: new (require('./input/Keyboard'))(window),
-    drawTile: 1
+    drawTile: 1,
+    isDrawing: true,
+    rng: seedrandom(Date.now())
 };
 
 var gridHeight = Math.ceil(canvas.stage.height / game.gridNodeHeight);
 var gridWidth = Math.ceil(canvas.stage.width / game.gridNodeWidth);
-var grid = require('./grid')(gridWidth, gridHeight, Uint16Array);
-
-var dataTools = require('./data-tools');
+var gridFab = require('./grid');
+var grid = gridFab(gridWidth, gridHeight, Uint16Array);
+var heatMap = gridFab(gridWidth, gridHeight, Uint16Array);
 
 var fs = require('fs');
-var tileTypes = JSON.parse(fs.readFileSync(__dirname + '/../data/tiles.json', 'utf8'));
+var stripJsonComments = require('strip-json-comments');
+var tileset = JSON.parse(stripJsonComments(fs.readFileSync(__dirname + '/../data/tiles.json', 'utf8')));
 
-var tileNames = Object.keys(tileTypes);
-var tileLookup = [];
-var tileCount = tileNames.length;
-for (var i = 0; i < tileNames.length; i++) {
-    tileLookup[tileTypes[tileNames[i]].id] = tileNames[i];
+var roomTemp = tileset.air.baseTemperature;
+
+for (var y = 0; y < heatMap.length; y++) {
+    for (var x = 0; x < heatMap[y].length; x++) {
+        heatMap[y][x] = roomTemp;
+    }
 }
+
+var tileLookup = [];
+for (var tileName in tileset) {
+    if (tileset.hasOwnProperty(tileName)) {
+        tileLookup[tileset[tileName].id] = tileName;
+        if (tileset[tileName].density === -1) {
+            tileset[tileName].density = Infinity;
+        }
+    }
+}
+var tileCount = tileLookup.length;
+
+tileset.fromID = function (id) {
+    return tileset[tileLookup[id]];
+};
 
 function drawGrid() {
     for (var x = 0; x < gridHeight; x++) {
@@ -114,7 +136,11 @@ function handleMouseInput (event) {
 }
 
 function processInput () {
-    if (game.mouse.mouse1) {}
+    if (game.mouse.mouse1) {
+        game.isDrawing = true;
+    } else {
+        game.isDrawing = false;
+    }
 
     if (game.keyboard.isKeyFirstDown(game.keyboard.Keymap.TAB)) {
         if (game.keyboard.isKeyDown(game.keyboard.Keymap.SHIFT)) {
@@ -133,11 +159,311 @@ canvas.stage.addEventListener('mousedown', handleMouseInput);
 canvas.stage.addEventListener('mouseup', handleMouseInput);
 
 function update (fdt) {
-    var tile = [];
+    game.rng = seedrandom(loop.tick);
+
+    if (game.isDrawing) {
+        var gridCoords = screenToGridCoords(game.mouse.position);
+        var target = tileset.fromID(grid.get(gridCoords));
+        var toDraw = tileset.fromID(game.drawTile);
+
+        if (tileLookup[target.id] === 'air' || toDraw.density > target.density || tileLookup[toDraw.id] === 'air') {
+            grid.put(gridCoords, toDraw.id);
+            delete staticTiles[gridCoords.toString()];
+        }
+    }
+
     var neighbors = [];
     for (var y = grid.length - 1; y >= 0; y--) {
-        for (var x = grid[y].length - 1; x >= 0; x--) {
+        for (var x = 0; x < grid[y].length; x++) {
             var coords = [x, y];
+            var tile = tileset.fromID(grid.get(coords));
+
+            processTile(coords, tile);
+        }
+    }
+}
+
+function applyThermalActivity (coords, tile, neighbors) {
+    var currentTemp = heatMap.get(coords);
+    var i;
+
+    if (tile.traits.indexOf('heater') !== -1) {
+        currentTemp = Math.min(currentTemp * 1.05, tile.baseTemperature);
+        heatMap.set(coords, currentTemp);
+
+        var neighborTemp;
+        for (i = 0; i < neighbors.length; i++) {
+            if (neighbors[i] === null) { continue; }
+
+            neighborTemp = heatMap.get(neighbors[i]);
+            neighborTemp = Math.min(neighborTemp + currentTemp * 0.05, tile.baseTemperature);
+            heatMap.set(neighbors[i], neighborTemp);
+        }
+    } else if (tile.traits.indexOf('cooler') !== -1) {
+        // TODO implement me
+    } else {
+        var sigmaTemp = currentTemp * 0.8;
+
+        var n = 1;
+        for (i = 0; i < neighbors.length; i++) {
+            if (neighbors[i] === null) { continue; }
+
+            sigmaTemp += heatMap.get(neighbors[i]);
+            n++;
+        }
+
+        heatMap.set(coords, Math.max(sigmaTemp / n, roomTemp));
+    }
+}
+
+var pendingGlobals = [];
+function processTile (coords, tile) {
+    var neighbors = grid.neighbors(coords, []);
+
+    if (loop.tick % 2 === 0) {
+        applyThermalActivity(coords, tile, neighbors);
+    }
+
+    if (tile.traits.indexOf('empty') !== -1 || tile.traits.indexOf('immobile') !== -1) {
+        return;
+    }
+
+    var actions = getTileActions(coords, tile, neighbors);
+    var action = selectTileAction(tile, actions)[1];
+
+    applyTileAction(coords, tile, neighbors, action);
+    applyDensitySwap(coords, tile, neighbors);
+    applyGlobalAction(pendingGlobals);
+}
+
+var staticTiles = {};
+
+function structuralCollapseCheck (start, loc) {
+    var screenCoords = gridToScreenCoords(loc);
+    var target = tileset.fromID(grid.get(loc));
+    var out = [];
+
+    if (staticTiles[loc.toString()]) { return grid.floodFill.SKIP; }
+
+    if (target.traits.indexOf('structural') === -1) {
+        if (target.traits.indexOf('solid') !== -1) {
+            vec2.subtract(out, loc, start);
+            if (out[1] >= out[0]) {
+                return grid.floodFill.ABORT;
+            }
+        } else {
+            return grid.floodFill.SKIP;
+        }
+    }
+}
+
+function pressureFlowCheck (start, loc) {
+    var screenCoords = gridToScreenCoords(loc);
+
+    if (loc[1] < start[1]) {
+        return grid.floodFill.SKIP;
+    }
+
+    var target = tileset.fromID(grid.get(loc));
+
+    if (target.traits.indexOf('empty') !== -1) {
+        grid.swap(start, loc);
+
+        return grid.floodFill.ABORT;
+    } else if (target.traits.indexOf('liquid') === -1) {
+        return grid.floodFill.SKIP;
+    }
+}
+
+function applyGlobalAction (pendingActions) {
+    var action;
+    var result;
+    var neighbors = [];
+    for (var i = 0; i < pendingActions.length; i++) {
+        action = pendingActions[i];
+        grid.neighbors(action[0], neighbors);
+
+        if (action[1] === 'structural-collapse') {
+            var sNeighbor = neighbors[grid.direction.S];
+
+            if (sNeighbor !== null && staticTiles[sNeighbor.toString()]) { continue; }
+
+            result = grid.floodFill(action[0], structuralCollapseCheck.bind(null, action[0]));
+            if (result === grid.floodFill.END && sNeighbor !== null &&
+                tileset[tileLookup[grid.get(sNeighbor)]].traits.indexOf('empty') !== -1) {
+                grid.swap(action[0], sNeighbor);
+                delete staticTiles[action[0].toString()];
+                delete staticTiles[sNeighbor.toString()];
+            } else {
+                staticTiles[action[0].toString()] = true;
+                // if (sNeighbor !== null) {
+                //     staticTiles[sNeighbor.toString()] = true;
+                // }
+            }
+        } else if (action[1] === 'pressure-flow') {
+            if (staticTiles[neighbors[grid.direction.S].toString()]) { continue; }
+
+            result = grid.floodFill(action[0], pressureFlowCheck.bind(null, action[0]));
+            if (result === grid.floodFill.END) {
+                staticTiles[neighbors[grid.direction.S].toString()] = true;
+                staticTiles[action[0].toString()] = true;
+            }
+        }
+    }
+    pendingActions.length = 0;
+}
+
+function applyDensitySwap (coords, tile, neighbors) {
+    var sNeighbor = grid.get(neighbors[grid.direction.S]);
+    var sTile = tileset.fromID(sNeighbor);
+    if (sNeighbor !== null && tileset.fromID(sTile.id).traits.indexOf('empty') === -1 && tile.density > sTile.density) {
+        grid.swap(coords, neighbors[grid.direction.S]);
+    }
+}
+
+function applyTileAction (coords, tile, neighbors, action) {
+    if (action.indexOf('swap-') !== -1) {
+        var dir = action.split('-')[1].toUpperCase();
+        grid.swap(coords, neighbors[grid.direction[dir]]);
+        delete staticTiles[coords.toString()];
+        delete staticTiles[neighbors[grid.direction[dir].toString()]];
+    } else if (action === 'clear') {
+        grid.clear(coords);
+    }
+}
+
+function getTileActions (coords, tile, neighbors) {
+    var actions = [];
+
+    if (tile.traits.indexOf('liquid') !== -1 || tile.traits.indexOf('viscous') !== -1) {
+        var scheduledMove = false;
+
+        if (neighbors[grid.direction.S] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.S])).traits.indexOf('empty') !== -1) {
+            scheduledMove = true;
+            actions.push([0.9, 'swap-s']);
+        }
+
+        if (neighbors[grid.direction.SW] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.W])).traits.indexOf('empty') !== -1 &&
+            tileset.fromID(grid.get(neighbors[grid.direction.SW])).traits.indexOf('empty') !== -1) {
+            scheduledMove = true;
+            actions.push([0.025, 'swap-sw']);
+        }
+
+        if (neighbors[grid.direction.SW] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.E])).traits.indexOf('empty') !== -1 &&
+            tileset.fromID(grid.get(neighbors[grid.direction.SE])).traits.indexOf('empty') !== -1) {
+            scheduledMove = true;
+            actions.push([0.025, 'swap-se']);
+        }
+
+        if (neighbors[grid.direction.N] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.NE])).traits.indexOf('fluid') !== -1) {
+            if (tileset.fromID(grid.get(neighbors[grid.direction.W])).traits.indexOf('empty') !== -1) {
+                scheduledMove = true;
+                actions.push([0.25, 'swap-w']);
+            }
+
+            if (tileset.fromID(grid.get(neighbors[grid.direction.E])).traits.indexOf('empty') !== -1) {
+                scheduledMove = true;
+                actions.push([0.25, 'swap-e']);
+            }
+        }
+
+        if (!scheduledMove && neighbors[grid.direction.S] !== null) {
+            pendingGlobals.push([coords, 'pressure-flow']);
+        }
+    }
+
+    /*
+     * Particulate tiles fall pretty much like you'd expect, including diagonally if they can
+     */
+    if (tile.traits.indexOf('particulate') !== -1) {
+        if (neighbors[grid.direction.S] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.S])).traits.indexOf('empty') !== -1) {
+            actions.push([0.9, 'swap-s']);
+        }
+
+        if (neighbors[grid.direction.SW] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.W])).traits.indexOf('empty') !== -1 &&
+            tileset.fromID(grid.get(neighbors[grid.direction.SW])).traits.indexOf('empty') !== -1) {
+            actions.push([0.0001, 'swap-sw']);
+        }
+
+        if (neighbors[grid.direction.SE] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.E])).traits.indexOf('empty') !== -1 &&
+            tileset.fromID(grid.get(neighbors[grid.direction.SE])).traits.indexOf('empty') !== -1) {
+            actions.push([0.0001, 'swap-se']);
+        }
+    }
+
+    /*
+     * Structural tiles can form arches if there is another structural tile near
+     * them. If they don't fall, they trigger a global check: they collapse if
+     * they're further out than up from a grounded structural tile (one with a
+     * solid tile beneath it)
+     */
+    if (tile.traits.indexOf('structural') !== -1) {
+        if (neighbors[grid.direction.S] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.S])).traits.indexOf('empty') !== -1 &&
+            tileset.fromID(grid.get(neighbors[grid.direction.W])).traits.indexOf('structural') === -1 &&
+            tileset.fromID(grid.get(neighbors[grid.direction.E])).traits.indexOf('structural') === -1 &&
+            tileset.fromID(grid.get(neighbors[grid.direction.SW])).traits.indexOf('structural') === -1 &&
+            tileset.fromID(grid.get(neighbors[grid.direction.SE])).traits.indexOf('structural') === -1) {
+            actions.push([0.9, 'fall-s']);
+        } else if (tileset.fromID(grid.get(neighbors[grid.direction.W])).traits.indexOf('structural') === -1 ||
+            tileset.fromID(grid.get(neighbors[grid.direction.E])).traits.indexOf('structural') === -1 ||
+            tileset.fromID(grid.get(neighbors[grid.direction.SW])).traits.indexOf('structural') === -1 ||
+            tileset.fromID(grid.get(neighbors[grid.direction.SE])).traits.indexOf('structural') === -1) {
+            pendingGlobals.push([coords, 'structural-collapse']);
+        }
+    }
+
+    if (tile.traits.indexOf('gas') !== -1) {
+        actions.push([0.25, 'noop']);
+
+        if (neighbors[grid.direction.N] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.N])).traits.indexOf('empty') !== -1) {
+            actions.push([0.9, 'swap-n']);
+        }
+
+        if (neighbors[grid.direction.NW] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.NW])).traits.indexOf('empty') !== -1) {
+            actions.push([0.05, 'swap-nw']);
+        }
+
+        if (neighbors[grid.direction.NE] !== null &&
+            tileset.fromID(grid.get(neighbors[grid.direction.NE])).traits.indexOf('empty') !== -1) {
+            actions.push([0.05, 'swap-ne']);
+        }
+    }
+
+    if (actions.length === 0 && neighbors[grid.direction.S] === null) {
+        actions.push([1, 'clear']);
+    } else if (actions.length === 0) {
+        actions.push([1, 'noop']);
+    }
+
+    return actions;
+}
+
+function selectTileAction (tile, actions) {
+    if (actions.length === 1 && actions[0][1] === 'noop') {
+        return actions[0];
+    }
+
+    var threshold = game.rng();
+    var sigmaP = 0;
+    for (var i = 0; i < actions.length; i++) {
+        sigmaP += actions[i][0];
+    }
+    var weight = 0;
+
+    for (i = 0; i < actions.length; i++) {
+        weight += actions[i][0] / sigmaP;
+        if (threshold < weight) {
+            return actions[i];
         }
     }
 }
@@ -148,7 +474,7 @@ function drawUI (t) {
 
     ctx.ui.clearRect(0, 0, canvas.ui.width, canvas.ui.height);
 
-    ctx.ui.fillStyle = tileTypes[tileLookup[game.drawTile]].color;
+    ctx.ui.fillStyle = tileset[tileLookup[game.drawTile]].color;
     ctx.ui.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
     ctx.ui.fillStyle = 'white';
     ctx.ui.fillText('FPS: ' + fps.toFixed(2), 15, canvas.ui.height - 15);
@@ -168,7 +494,7 @@ function drawUI (t) {
     ctx.ui.strokeStyle = 'white';
     ctx.ui.lineWidth = 2;
     for (var i = 0; i < tileLookup.length; i++) {
-        var tile = tileTypes[tileLookup[i]];
+        var tile = tileset[tileLookup[i]];
         ctx.ui.fillStyle = tile.color;
 
         ctx.ui.beginPath();
@@ -180,19 +506,35 @@ function drawUI (t) {
     }
 
     ctx.ui.fillStyle = 'white';
-    ctx.ui.fillText('Current tile: ' + tileLookup[game.drawTile], switcherX, switcherY + switcherHeight + switcherPadding / 2);
+    ctx.ui.fillText('Current tile: ' + tileLookup[game.drawTile] + " " + JSON.stringify(tileset.fromID(game.drawTile).traits), switcherX, switcherY + switcherHeight + switcherPadding / 2);
 }
 
 function render (t) {
-    var coords;
+    var coords = [];
 
     ctx.stage.fillStyle = 'black';
     ctx.stage.fillRect(0, 0, canvas.stage.width, canvas.stage.height);
 
-    var tile = [];
     for (var y = 0; y < grid.length; y++) {
         for (var x = 0; x < grid[y].length; x++) {
-            coords = [x, y];
+            coords[0] = x;
+            coords[1] = y;
+
+            var screenCoords = gridToScreenCoords(coords);
+
+            var tile = tileset.fromID(grid.get(coords));
+
+            var temp = heatMap.get(coords);
+            if (temp > roomTemp) {
+                ctx.stage.fillStyle = 'rgba(255, 0, 0, ' + (1 - roomTemp / temp) + ')';
+                ctx.stage.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
+            }
+
+            if (tileLookup[tile.id] === 'air') { continue; }
+
+            ctx.stage.fillStyle = tile.color;
+
+            ctx.stage.fillRect(screenCoords[0], screenCoords[1], game.gridNodeWidth, game.gridNodeHeight);
         }
     }
 }

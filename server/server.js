@@ -7,7 +7,18 @@ var browserify = require('browserify-middleware');
 browserify.settings('transform', ['brfs']);
 
 app.use(express.static('public'));
-app.get('/js/client.js', browserify('./client/client.js'));
+
+var shared = ['crypto'];
+app.get('/js/libs.js', browserify(shared, {
+    cache: true,
+    precompile: true,
+    minify: true,
+    gzip: true
+}));
+app.get('/js/client.js', browserify('./client/client.js', {
+    external: shared
+}));
+
 app.get('/', function (req, res) {
     res.sendFile(path.resolve(__dirname + '/../templates/index.html'));
 });

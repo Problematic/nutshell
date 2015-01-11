@@ -8,7 +8,9 @@
     "browserify-middleware": "^4.1.0",
     "express": "^4.10.7",
     "gl-matrix": "^2.1.0",
-    "helix-loop": "^1.0.4"
+    "helix-loop": "^1.0.4",
+    "seedrandom": "^2.3.11",
+    "strip-json-comments": "^1.0.2"
   },
   "devDependencies": {
     "chai": "^1.10.0",

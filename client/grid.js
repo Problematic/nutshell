@@ -105,12 +105,12 @@ module.exports = function (width, height, ArrayConstructor) {
         while (queue.length) {
             current = queue.pop();
             status = process(current);
+            processed.push(current);
             if (status === this.floodFill.ABORT) {
                 return this.floodFill.ABORT;
             } else if (status === this.floodFill.SKIP) {
                 continue;
             }
-            processed.push(current);
             this.neighbors(current, neighbors);
             for (var i = 0; i < neighbors.length; i++) {
                 if (neighbors[i] === null) { continue; }
